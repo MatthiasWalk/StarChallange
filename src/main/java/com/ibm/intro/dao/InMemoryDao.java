@@ -8,11 +8,9 @@
  */
 package com.ibm.intro.dao;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.ibm.intro.exception.DataStoreException;
 import com.ibm.intro.model.AbstractObject;
@@ -26,13 +24,16 @@ import com.ibm.intro.model.EntityState;
  */
 public abstract class InMemoryDao<O extends AbstractObject> {
 
-	private HashSet<Entity<O>> store;
+	private final HashSet<Entity<O>> store;
+
+	private final HashMap<String, ReentrantLock> lockMap;
 
 	/**
 	 * Initializes an InMemoryDao object.
 	 */
 	public InMemoryDao() {
 		this.store = new HashSet<Entity<O>>();
+		this.lockMap = new HashMap<String, ReentrantLock>();
 	}
 
 	/**
@@ -45,18 +46,42 @@ public abstract class InMemoryDao<O extends AbstractObject> {
 	 * @throws DataStoreException is thrown if the the lock could not be acquired.
 	 */
 	public boolean lock(String id, Long wait) throws DataStoreException {
-		// #task 1: implement me!
-		return false;
+		//It really depends on what you want this method to do exactly
+		//I interpreted the wait parameter to mean that it should wait for a lock to be released,
+		//not for the object with the id to enter the store collection in general
+
+		//Also I'm not sure if it's intended behaviour to throw an exception when the lock could not be acquired, as that would render the boolean return type useless
+
+		//Is locking an object which does not exist in the store collection intended?
+		//if (findEntityById(id) != null){
+			synchronized (lockMap){
+				ReentrantLock lock = lockMap.getOrDefault(id, new ReentrantLock());
+				try {
+					if(lock.tryLock(wait, TimeUnit.MILLISECONDS)){
+						lockMap.put(id, lock);
+						return true;
+					}
+				} catch (InterruptedException e) {}
+			}
+		//}
+		throw new DataStoreException(String.format("Lock for the entity with id '%s' could not be acquired", id));
 	}
 
 	/**
-	 * Tries to release a lock for a given id. A lock can only be release from the thread which holds the lock.
+	 * Tries to release a lock for a given id. A lock can only be released from the thread which holds the lock.
 	 * 
 	 * @param id: the id of the to be released business object.
 	 * @return true or false whether the release was successful or not
 	 */
 	public boolean release(String id) {
-		// #task 1: implement me!
+		synchronized (lockMap) {
+			if (lockMap.containsKey(id)){
+				var lock = lockMap.get(id);
+				lock.unlock();
+				lockMap.put(id, lock);
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -85,7 +110,7 @@ public abstract class InMemoryDao<O extends AbstractObject> {
 	 * 
 	 * @param object: the business object to be created, updated or deleted.
 	 * @return: the updated business object.
-	 * @throws A DataStoreException if the persist failed.
+	 * @throws DataStoreException if the persist failed.
 	 */
 	@SuppressWarnings("unchecked")
 	public O persist(O object) throws DataStoreException {
@@ -147,7 +172,7 @@ public abstract class InMemoryDao<O extends AbstractObject> {
 	 * 
 	 * @param objs the array of objects.
 	 * @return the persisted list of objects.
-	 * @throws A DataStoreException if the persist failed.
+	 * @throws DataStoreException if the persist failed.
 	 */
 	public List<O> persist(@SuppressWarnings("unchecked") O... objs) throws DataStoreException {
 		if (objs == null) {
@@ -164,7 +189,7 @@ public abstract class InMemoryDao<O extends AbstractObject> {
 	 * 
 	 * @param objs the array of objects.
 	 * @return the persisted list of objects.
-	 * @throws A DataStoreException if the persist failed.
+	 * @throws DataStoreException if the persist failed.
 	 */
 	public List<O> persist(List<O> objs) throws DataStoreException {
 		if (objs == null) {
