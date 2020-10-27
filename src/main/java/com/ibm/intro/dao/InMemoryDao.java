@@ -1,18 +1,16 @@
 /**
  * star-challenge
- *
+ * <p>
  * (C) Copyright 2016 IBM Corporation
  * All rights reserved
- *
+ * <p>
  * Creation date: 03.08.2016
  */
 package com.ibm.intro.dao;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.ibm.intro.exception.DataStoreException;
 import com.ibm.intro.model.AbstractObject;
@@ -21,209 +19,226 @@ import com.ibm.intro.model.EntityState;
 
 /**
  * The in memory storage for any kind of AbstractObject e.g. Production.
- * 
+ *
  * @author Richard Holzeis
  */
 public abstract class InMemoryDao<O extends AbstractObject> {
 
-	private HashSet<Entity<O>> store;
+    private final HashSet<Entity<O>> store;
 
-	/**
-	 * Initializes an InMemoryDao object.
-	 */
-	public InMemoryDao() {
-		this.store = new HashSet<Entity<O>>();
-	}
 
-	/**
-	 * Tries to acquire the lock for a requested id. A lock may only be granted if it isn't already locked. If the
-	 * business object is already locked by the requesting thread, the lock remains and the method does not block.
-	 * 
-	 * @param id: the id of the requested business object.
-	 * @param wait: the time to wait for a lock in milliseconds.
-	 * @return true if the lock has been acquired.
-	 * @throws DataStoreException is thrown if the the lock could not be acquired.
-	 */
-	public boolean lock(String id, Long wait) throws DataStoreException {
-		// #task 1: implement me!
-		return false;
-	}
+    /**
+     * Initializes an InMemoryDao object.
+     */
+    public InMemoryDao() {
+        this.store = new HashSet<Entity<O>>();
+    }
 
-	/**
-	 * Tries to release a lock for a given id. A lock can only be release from the thread which holds the lock.
-	 * 
-	 * @param id: the id of the to be released business object.
-	 * @return true or false whether the release was successful or not
-	 */
-	public boolean release(String id) {
-		// #task 1: implement me!
-		return false;
-	}
+    /**
+     * Tries to acquire the lock for a requested id. A lock may only be granted if it isn't already locked. If the
+     * business object is already locked by the requesting thread, the lock remains and the method does not block.
+     *
+     * @param id:   the id of the requested business object.
+     * @param wait: the time to wait for a lock in milliseconds.
+     * @return true if the lock has been acquired.
+     * @throws DataStoreException is thrown if the the lock could not be acquired.
+     */
+    public boolean lock(String id, Long wait) throws DataStoreException {
+            var entityToLock = findEntityById(id);
+            if (entityToLock != null) {
+                if (entityToLock.lock(wait)) {
+                    store.remove(entityToLock);
+                    store.add(entityToLock);
+                    return true;
+            }
+        }
 
-	/**
-	 * Finds the stored entity by the business object id.
-	 * 
-	 * @param id: the id of the business object.
-	 * @return the stored entity.
-	 */
-	private Entity<O> findEntityById(String id) {
-		synchronized (store) {
-			for (Entity<O> entity : store) {
-				if (!entity.retrieveId().equals(id)) {
-					continue;
-				}
-				return entity;
-			}
-			return null;
-		}
-	}
+        throw new DataStoreException(String.format("Lock for the entity with id '%s' could not be acquired", id));
+    }
 
-	/**
-	 * Persists a business object according to the entity state. Plausibility rules are applied to check if the action
-	 * is valid. It implicitly sets a change date and resets the entity state to read after successful update. A persist
-	 * on a read object will do nothing.
-	 * 
-	 * @param object: the business object to be created, updated or deleted.
-	 * @return: the updated business object.
-	 * @throws A DataStoreException if the persist failed.
-	 */
-	@SuppressWarnings("unchecked")
-	public O persist(O object) throws DataStoreException {
-		if (object == null) {
-			return object;
-		}
+    /**
+     * Tries to release a lock for a given id. A lock can only be released from the thread which holds the lock.
+     *
+     * @param id: the id of the to be released business object.
+     * @return true or false whether the release was successful or not
+     */
+    public boolean release(String id) {
+            var entityToRelease = findEntityById(id);
+            if (entityToRelease != null) {
+                if (entityToRelease.release()) {
+                    store.remove(entityToRelease);
+                    store.add(entityToRelease);
+                    return true;
+            }
+        }
 
-		switch (object.getEntityState()) {
-		case CREATED: {
-			if (object.getId() != null) {
-				throw new DataStoreException("Cannot create already persited entity!");
-			}
-			object.setEntityState(EntityState.READ);
-			// assign an id to created objects.
-			object.setId(UUID.randomUUID().toString());
-			object.setChangeDate(System.currentTimeMillis());
+        return false;
+    }
 
-			// ensure mutual exclusion when accessing the internal storage.
-			synchronized (store) {
-				// objects are always kept as clone in the storage, in order to prevent
-				// unintended updates.
-				store.add(new Entity<O>((O) object.clone()));
-			}
-		}
-			break;
-		case UPDATED: {
-			if (object.getId() == null) {
-				throw new DataStoreException("Cannot update a created entity!");
-			}
+    /**
+     * Finds the stored entity by the business object id.
+     *
+     * @param id: the id of the business object.
+     * @return the stored entity.
+     */
+    private Entity<O> findEntityById(String id) {
+        synchronized (store) {
+            for (Entity<O> entity : store) {
+                if (!entity.retrieveId().equals(id)) {
+                    continue;
+                }
+                return entity;
+            }
+            return null;
+        }
+    }
 
-			Entity<O> entity = this.findEntityById(object.getId());
-			object.setEntityState(EntityState.READ);
-			object.setChangeDate(System.currentTimeMillis());
-			// ensure mutual exclusion when accessing the internal storage.
-			synchronized (store) {
-				entity.update((O) object.clone());
-			}
-		}
-			break;
-		case DELETED: {
-			// ensure mutual exclusion when accessing the internal storage.
-			Entity<O> entity = this.findEntityById(object.getId());
-			synchronized (store) {
-				if (!store.remove(entity)) {
-					throw new DataStoreException("Cannot delete entity!");
-				}
-			}
-		}
-			break;
-		default:
-			break;
-		}
+    /**
+     * Persists a business object according to the entity state. Plausibility rules are applied to check if the action
+     * is valid. It implicitly sets a change date and resets the entity state to read after successful update. A persist
+     * on a read object will do nothing.
+     *
+     * @param object: the business object to be created, updated or deleted.
+     * @throws DataStoreException if the persist failed.
+     * @return: the updated business object.
+     */
+    @SuppressWarnings("unchecked")
+    public O persist(O object) throws DataStoreException {
+        if (object == null) {
+            return object;
+        }
 
-		return object;
-	}
+        switch (object.getEntityState()) {
+            case CREATED: {
+                if (object.getId() != null) {
+                    throw new DataStoreException("Cannot create already persited entity!");
+                }
+                object.setEntityState(EntityState.READ);
+                // assign an id to created objects.
+                object.setId(UUID.randomUUID().toString());
+                object.setChangeDate(System.currentTimeMillis());
 
-	/**
-	 * Persists an array of objects.
-	 * 
-	 * @param objs the array of objects.
-	 * @return the persisted list of objects.
-	 * @throws A DataStoreException if the persist failed.
-	 */
-	public List<O> persist(@SuppressWarnings("unchecked") O... objs) throws DataStoreException {
-		if (objs == null) {
-			return new ArrayList<O>();
-		}
-		for (O obj : objs) {
-			this.persist(obj);
-		}
-		return Arrays.asList(objs);
-	}
+                // ensure mutual exclusion when accessing the internal storage.
+                synchronized (store) {
+                    // objects are always kept as clone in the storage, in order to prevent
+                    // unintended updates.
+                    store.add(new Entity<O>((O) object.clone()));
+                }
+            }
+            break;
+            case UPDATED: {
+                if (object.getId() == null) {
+                    throw new DataStoreException("Cannot update a created entity!");
+                }
 
-	/**
-	 * Persists a list of objects.
-	 * 
-	 * @param objs the array of objects.
-	 * @return the persisted list of objects.
-	 * @throws A DataStoreException if the persist failed.
-	 */
-	public List<O> persist(List<O> objs) throws DataStoreException {
-		if (objs == null) {
-			return objs;
-		}
-		for (O obj : objs) {
-			this.persist(obj);
-		}
-		return objs;
-	}
+                Entity<O> entity = this.findEntityById(object.getId());
+                object.setEntityState(EntityState.READ);
+                object.setChangeDate(System.currentTimeMillis());
+                // ensure mutual exclusion when accessing the internal storage.
+                synchronized (store) {
+                    entity.update((O) object.clone());
+                }
+            }
+            break;
+            case DELETED: {
+                // ensure mutual exclusion when accessing the internal storage.
+                Entity<O> entity = this.findEntityById(object.getId());
+                synchronized (store) {
+                    if (!store.remove(entity)) {
+                        throw new DataStoreException("Cannot delete entity!");
+                    }
+                }
+            }
+            break;
+            default:
+                break;
+        }
 
-	/**
-	 * Loads an object by the id. Note, that only a copy is returned!
-	 * 
-	 * @param id: the id of the requested object.
-	 * @return the object or null if not found.
-	 */
-	public O load(String id) {
-		Entity<O> entity = this.findEntityById(id);
-		if (entity == null) {
-			return null;
-		}
-		return entity.retrieveObject();
-	}
+        return object;
+    }
 
-	/**
-	 * Lists all stored objects.
-	 * 
-	 * @return
-	 */
-	public List<O> list() {
-		List<O> list = new ArrayList<O>();
-		// ensure mutual exclusion when accessing the internal storage.
-		synchronized (store) {
-			for (Entity<O> entity : store) {
-				list.add(entity.retrieveObject());
-			}
-		}
-		return list;
-	}
+    /**
+     * Persists an array of objects.
+     *
+     * @param objs the array of objects.
+     * @return the persisted list of objects.
+     * @throws DataStoreException if the persist failed.
+     */
+    public List<O> persist(@SuppressWarnings("unchecked") O... objs) throws DataStoreException {
+        if (objs == null) {
+            return new ArrayList<O>();
+        }
+        for (O obj : objs) {
+            this.persist(obj);
+        }
+        return Arrays.asList(objs);
+    }
 
-	/**
-	 * Returns the last change date of the object or null if object does not exist.
-	 * 
-	 * @param id: the id of the requested object.
-	 * @return the last change date.
-	 */
-	public Long loadLastChangeDate(String id) {
-		O object = this.load(id);
-		if (object == null) {
-			return null;
-		}
-		return object.getChangeDate();
-	}
+    /**
+     * Persists a list of objects.
+     *
+     * @param objs the array of objects.
+     * @return the persisted list of objects.
+     * @throws DataStoreException if the persist failed.
+     */
+    public List<O> persist(List<O> objs) throws DataStoreException {
+        if (objs == null) {
+            return objs;
+        }
+        for (O obj : objs) {
+            this.persist(obj);
+        }
+        return objs;
+    }
 
-	/**
-	 * Clears the internal storage.
-	 */
-	public void evict() {
-		this.store.clear();
-	}
+    /**
+     * Loads an object by the id. Note, that only a copy is returned!
+     *
+     * @param id: the id of the requested object.
+     * @return the object or null if not found.
+     */
+    public O load(String id) {
+        Entity<O> entity = this.findEntityById(id);
+        if (entity == null) {
+            return null;
+        }
+        return entity.retrieveObject();
+    }
+
+    /**
+     * Lists all stored objects.
+     *
+     * @return
+     */
+    public List<O> list() {
+        List<O> list = new ArrayList<O>();
+        // ensure mutual exclusion when accessing the internal storage.
+        synchronized (store) {
+            for (Entity<O> entity : store) {
+                list.add(entity.retrieveObject());
+            }
+        }
+        return list;
+    }
+
+    /**
+     * Returns the last change date of the object or null if object does not exist.
+     *
+     * @param id: the id of the requested object.
+     * @return the last change date.
+     */
+    public Long loadLastChangeDate(String id) {
+        O object = this.load(id);
+        if (object == null) {
+            return null;
+        }
+        return object.getChangeDate();
+    }
+
+    /**
+     * Clears the internal storage.
+     */
+    public void evict() {
+        this.store.clear();
+    }
 }
