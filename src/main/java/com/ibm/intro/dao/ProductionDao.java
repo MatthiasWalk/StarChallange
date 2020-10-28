@@ -19,6 +19,20 @@ public class ProductionDao extends InMemoryDao<Production> {
 
 	/** the singleton instance */
 	private static ProductionDao instance;
+	/*
+		Bonus question answer:
+			the getInstance method needs to be synchronized in order to make the singleton thread-safe.
+			What this means is that when the getInstance method is called for the first time, it could be called from different threads.
+			Those different threads could then hold different versions of the same singleton, which would make it not a singleton anymore.
+
+			I disagree though that the synchronized keyword is best way to do this, since you will impact performance,
+			because every call to the method, not just the first one will be blocking.
+
+			A better way to achieve the same goal cheaper would be to use synchronized inside of the if statement, because then
+			it would only be called once at the initialization.
+
+			Thanks for listening to my ted talk.
+	 */
 
 	/** gets the singleton instance */
 	public synchronized static ProductionDao getInstance() {
