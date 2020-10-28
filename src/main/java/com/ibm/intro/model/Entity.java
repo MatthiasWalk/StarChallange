@@ -79,7 +79,9 @@ public class Entity<O extends AbstractObject> {
 	 */
 	public synchronized boolean lock(Long wait) {
 		try {
-			return lock.tryLock(wait, TimeUnit.MILLISECONDS);
+		    boolean success =  lock.tryLock(wait, TimeUnit.MILLISECONDS);
+		    threadId = Thread.currentThread().getId();
+			return success;
 		} catch (InterruptedException e) {
 			return false;
 		}
