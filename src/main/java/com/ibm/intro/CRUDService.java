@@ -8,7 +8,11 @@
  */
 package com.ibm.intro;
 
+import com.ibm.intro.exception.DataStoreException;
+import com.ibm.intro.exception.OptimisticLockingException;
 import com.ibm.intro.model.AbstractObject;
+
+import javax.xml.crypto.Data;
 
 /**
  * @author Richard Holzeis
@@ -16,9 +20,12 @@ import com.ibm.intro.model.AbstractObject;
  */
 public interface CRUDService<O extends AbstractObject> {
 
-	/*
-	 * #task 2: define me
-	 * 
-	 * create, read, update, delete
-	 */
+	public O create(O abstractObject) throws DataStoreException;
+
+	public O read(String id);
+
+	public O update(O abstractObject) throws DataStoreException, OptimisticLockingException;
+
+	public void delete(O abstractObhect) throws DataStoreException, OptimisticLockingException;
+
 }
